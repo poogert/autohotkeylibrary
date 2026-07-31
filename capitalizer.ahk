@@ -36,11 +36,8 @@
         menu.AddButton("w100", "3 - title")
             .OnEvent("Click", (*) => TransformText("title", selected, menu))
 
-        menu.AddButton("w100", "4 - sqwrap")
-            .OnEvent("Click", (*) => TransformText("1q", selected, menu))
-
-        menu.AddButton("w100", "5 - dqwrap")
-            .OnEvent("Click", (*) => TransformText("2q", selected, menu))
+        menu.AddButton("w100", "4 - wrap")
+            .OnEvent("Click", (*) => AskForWrapper(selected, menu))
 
         menu.AddButton("w100", "0 - cancel")
             .OnEvent("Click", (*) => menu.Destroy())
@@ -54,8 +51,7 @@
         Hotkey("1", (*) => TransformText("upper", selected, menu), "On")
         Hotkey("2", (*) => TransformText("lower", selected, menu), "On")
         Hotkey("3", (*) => TransformText("title", selected, menu), "On")
-        Hotkey("4", (*) => TransformText("1q", selected, menu), "On")
-        Hotkey("5", (*) => TransformText("2q", selected, menu), "On")
+        Hotkey("4", (*) => AskForWrapper(selected, menu), "On")
 
         Hotkey("0", (*) => menu.Destroy(), "On")
 
@@ -66,7 +62,7 @@
     }
 }
 
-TransformText(choice, selected, menu)
+TransformText(choice, selected, menu, wrapper := "")
 {
     ; events depending on option
     switch choice
@@ -79,11 +75,14 @@ TransformText(choice, selected, menu)
 
         case "title":
             result := StrTitle(selected)
-        case "1q":
-            result := "'" selected "'"
-        case "2q":            
-            result := '"' selected '"'
-        
+
+        case "wrap":
+            pair := GetWrapperPair(Trim(wrapper))
+
+            if !pair
+                return
+
+            result := pair[1] selected pair[2]        
     }
 
     menu.Destroy()
@@ -95,5 +94,76 @@ TransformText(choice, selected, menu)
     Sleep 40
     
     SendInput "^v"
+}
+
+AskForWrapper(selected, menu)
+{
+    input := InputBox(
+        "Enter wrapper: `"`", (), {}, [], etc.",
+        "Wrap text",
+        "w300 h130"
+    )
+
+    if (input.Result = "Cancel")
+        return
+
+    wrapper := input.Value
+
+    ; You can replace this with your own wrapper logic.
+    TransformText("wrap", selected, menu, wrapper)
+}
+
+GetWrapperPair(wrapper)
+{
+    dq := Chr(34)
+    sq := Chr(39)
+
+    wrappers := Map(
+        "(",       ["(", ")"],
+        ")",       ["(", ")"],
+        "()",       ["(", ")"],
+
+        "{",       ["{", "}"],
+        "}",       ["{", "}"],
+        "{}",      ["{", "}"],
+
+        "[",       ["[", "]"],
+        "]",       ["[", "]"],
+        "[]",      ["[", "]"],
+
+        "<",       ["<", ">"],
+        ">",       ["<", ">"],
+        "</",      ["</", ">"],
+        "<>",      ["<", ">"],
+        "</>",     ["</", ">"],
+
+        "|",       ["|", "|"],
+        "\",       ["\", "\"],
+        "*",       ["*", "*"],
+        "**",      ["**", "**"],
+
+        ; single quote wrapping
+        sq,     [sq, sq],
+        sq sq,     [sq, sq],
+
+        ; double quote wrapping
+        dq,     [dq, dq],
+        dq dq,     [dq, dq],
+        dq dq dq, [dq dq dq, dq dq dq],
+
+        "<!--",    ["<!--", "-->"],
+        "-->",     ["<!--", "-->"],
+
+        "/*",      ["/*", "*/"],
+        "*/",      ["/*", "*/"]
+    )
+
+    if !wrappers.Has(wrapper)
+    {
+        MsgBox "Invalid wrapper: " wrapper
+        return false
+    }
+
+    return wrappers[wrapper]
 }
 

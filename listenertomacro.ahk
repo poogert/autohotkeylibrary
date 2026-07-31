@@ -5,12 +5,19 @@ global IsRecording := false
 global Recorder := ""
 global RecordedKeys := []
 global MacroGui := ""
+global RecordedWindow := 0
+global RecordedControl := ""
 
 ^+Tab::ToggleRecording()
+F8::ReplayMacro()
 
 ToggleRecording()
 {
-    global IsRecording, Recorder, RecordedKeys
+    global IsRecording
+    global Recorder
+    global RecordedKeys
+    global RecordedWindow
+    global RecordedControl
 
     if !IsRecording
     {
@@ -22,7 +29,7 @@ ToggleRecording()
         Recorder.OnKeyDown := RecordKey
         Recorder.Start()
 
-        ToolTip("Recording keyboard input...")
+        ToolTip("recording keyboard input...")
         SetTimer(() => ToolTip(), -1200)
     }
     else
@@ -32,13 +39,24 @@ ToggleRecording()
         if IsObject(Recorder)
             Recorder.Stop()
 
+        ; save the active editor and text control
+        RecordedWindow := WinGetID("A")
+
+        try
+            RecordedControl := ControlGetFocus(
+                "ahk_id " RecordedWindow
+            )
+        catch
+            RecordedControl := ""
+
         ShowRecordedMacro()
     }
 }
 
 RecordKey(InputHookObject, VK, SC)
 {
-    global IsRecording, RecordedKeys
+    global IsRecording
+    global RecordedKeys
 
     if !IsRecording
         return
@@ -47,14 +65,16 @@ RecordKey(InputHookObject, VK, SC)
         Format("vk{:02X}sc{:03X}", VK, SC)
     )
 
-    ; Do not record modifier keys by themselves.
+    ; ignore standalone modifiers
     if IsModifierKey(keyName)
         return
 
-    ; Do not record Ctrl+Shift+Tab, since it stops recording.
-    if keyName = "Tab"
+    ; ignore the recording shortcut
+    if (
+        keyName = "Tab"
         && GetKeyState("Ctrl", "P")
         && GetKeyState("Shift", "P")
+    )
     {
         return
     }
@@ -80,7 +100,10 @@ RecordKey(InputHookObject, VK, SC)
         displayModifiers .= "Shift + "
     }
 
-    if GetKeyState("LWin", "P") || GetKeyState("RWin", "P")
+    if (
+        GetKeyState("LWin", "P")
+        || GetKeyState("RWin", "P")
+    )
     {
         modifiers .= "#"
         displayModifiers .= "Win + "
@@ -90,13 +113,13 @@ RecordKey(InputHookObject, VK, SC)
 
     RecordedKeys.Push({
         SendValue: modifiers . sendKey,
-        DisplayValue: displayModifiers . FriendlyKeyName(keyName)
+        DisplayValue:
+            displayModifiers . FriendlyKeyName(keyName)
     })
 }
 
 FormatSendKey(keyName)
 {
-    ; Named keys need braces for Send().
     namedKeys := Map(
         "Space", true,
         "Up", true,
@@ -122,7 +145,7 @@ FormatSendKey(keyName)
     if RegExMatch(keyName, "^F\d+$")
         return "{" . keyName . "}"
 
-    ; Braces have special meaning inside Send().
+    ; escape braces for send
     if keyName = "{"
         return "{{}"
 
@@ -155,7 +178,8 @@ FriendlyKeyName(keyName)
 
 IsModifierKey(keyName)
 {
-    return keyName = "LControl"
+    return (
+        keyName = "LControl"
         || keyName = "RControl"
         || keyName = "LShift"
         || keyName = "RShift"
@@ -163,15 +187,21 @@ IsModifierKey(keyName)
         || keyName = "RAlt"
         || keyName = "LWin"
         || keyName = "RWin"
+    )
 }
 
 ShowRecordedMacro()
 {
-    global RecordedKeys, MacroGui
+    global RecordedKeys
+    global MacroGui
 
     try MacroGui.Destroy()
 
-    MacroGui := Gui("-MaximizeBox -MinimizeBox", "Recorded Macro")
+    MacroGui := Gui(
+        "-MaximizeBox -MinimizeBox",
+        "Recorded Macro"
+    )
+
     MacroGui.SetFont("s10", "Segoe UI")
 
     if RecordedKeys.Length = 0
@@ -183,9 +213,14 @@ ShowRecordedMacro()
         sequenceParts := []
 
         for recordedKey in RecordedKeys
-            sequenceParts.Push(recordedKey.DisplayValue)
+            sequenceParts.Push(
+                recordedKey.DisplayValue
+            )
 
-        sequenceText := JoinArray(sequenceParts, "`n")
+        sequenceText := JoinArray(
+            sequenceParts,
+            "`n"
+        )
     }
 
     MacroGui.AddText(
@@ -203,8 +238,20 @@ ShowRecordedMacro()
         "Close"
     )
 
-    replayButton.OnEvent("Click", (*) => ReplayMacro())
-    closeButton.OnEvent("Click", (*) => MacroGui.Destroy())
+    replayButton.OnEvent(
+        "Click",
+        (*) => ReplayMacro()
+    )
+
+    closeButton.OnEvent(
+        "Click",
+        (*) => MacroGui.Destroy()
+    )
+
+    MacroGui.OnEvent(
+        "Escape",
+        (*) => MacroGui.Destroy()
+    )
 
     MacroGui.Show()
 }
@@ -212,20 +259,54 @@ ShowRecordedMacro()
 ReplayMacro()
 {
     global RecordedKeys
+    global RecordedWindow
+    global RecordedControl
+    global MacroGui
 
     if RecordedKeys.Length = 0
         return
 
-    ; Small delay gives you time to focus the target window.
-    ToolTip("Replaying...")
-    Sleep(500)
-    ToolTip()
+    ; hide the menu before restoring focus
+    try MacroGui.Hide()
+
+    if (
+        RecordedWindow
+        && WinExist("ahk_id " RecordedWindow)
+    )
+    {
+        WinActivate(
+            "ahk_id " RecordedWindow
+        )
+
+        if !WinWaitActive(
+            "ahk_id " RecordedWindow,
+            ,
+            1
+        )
+        {
+            MsgBox "could not restore the target window."
+            return
+        }
+
+        ; restore the original text control
+        if RecordedControl != ""
+        {
+            try ControlFocus(
+                RecordedControl,
+                "ahk_id " RecordedWindow
+            )
+        }
+    }
+
+    Sleep 150
 
     for recordedKey in RecordedKeys
     {
         Send(recordedKey.SendValue)
-        Sleep(50)
+        Sleep 50
     }
+
+    try MacroGui.Destroy()
 }
 
 JoinArray(items, separator)
@@ -242,6 +323,3 @@ JoinArray(items, separator)
 
     return output
 }
-
-; Optional shortcut to replay without opening the window.
-F8::ReplayMacro()
